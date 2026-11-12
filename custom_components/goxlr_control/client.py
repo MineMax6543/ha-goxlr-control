@@ -88,6 +88,7 @@ class GoXLRClient:
         self._stopping = False
         self.entry_id = ""  # set by the integration setup
         self.hub_device_id: str | None = None  # set by the integration setup
+        self.advanced_groups: set[str] = set()  # set by the integration setup
         self._pending: dict[int, asyncio.Future[Any]] = {}
         self._patch_listeners: set[Callable[[list[dict[str, Any]]], None]] = set()
 

@@ -15,6 +15,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 
 from custom_components.goxlr_control import client as client_mod, mic_monitor
+from custom_components.goxlr_control.advanced import ADVANCED_GROUPS, group_for_key
 from custom_components.goxlr_control.const import DOMAIN
 
 from .fixtures import SERIAL, status
@@ -228,16 +229,64 @@ async def test_core_controls_and_recovery(hass: HomeAssistant, daemon: FakeDaemo
     await hass.async_block_till_done()
 
 
-async def test_every_entity_loads(hass: HomeAssistant, daemon: FakeDaemon) -> None:
-    """Enable every (also disabled-by-default) entity and check none errors."""
+async def _configure(hass, entry, groups):
+    """Run the Configure (options) dialog with the given advanced groups ticked."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {g: g in groups for g in ADVANCED_GROUPS}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    await _until(hass, lambda: _state(hass, "number.goxlr_mic_volume").state == "100", "reload")
+
+
+async def test_advanced_groups(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    """Every hidden entity belongs to a group, every group has entities,
+    and Configure switches whole groups on and off."""
     entry = await _setup(hass, daemon)
     reg = er.async_get(hass)
-    entries = er.async_entries_for_config_entry(reg, entry.entry_id)
-    for e in entries:
-        if e.disabled_by is not None:
-            reg.async_update_entity(e.entity_id, disabled_by=None)
-    assert await hass.config_entries.async_reload(entry.entry_id)
-    await _until(hass, lambda: _state(hass, "number.goxlr_mic_volume").state == "100", "reload")
+
+    def ents():
+        return er.async_entries_for_config_entry(reg, entry.entry_id)
+
+    def key(e):
+        return e.unique_id.split("_", 1)[1]
+
+    hidden = [e for e in ents() if e.disabled_by is not None]
+    assert hidden
+    assert not [e.entity_id for e in hidden if group_for_key(key(e)) is None]
+    assert not [e.entity_id for e in ents() if e.disabled_by is None and group_for_key(key(e))]
+    used = {group_for_key(key(e)) for e in hidden}
+    assert used == set(ADVANCED_GROUPS), set(ADVANCED_GROUPS) - used
+    # The always-on companions of grouped entities stay visible.
+    for always_on in ("switch.goxlr_robot", "select.goxlr_robot_style", "select.goxlr_profile",
+                      "text.goxlr_fader_a_screen_text", "switch.goxlr_mix_b_submix"):
+        assert hass.states.get(always_on) is not None, always_on
+
+    await _call(hass, "switch", "turn_off", "switch.goxlr_utility_auto_reconnect")
+    await _configure(hass, entry, {"routing", "eq"})
+    assert entry.options["advanced_groups"] == ["eq", "routing"]
+    assert entry.options["auto_reconnect"] is False  # other options kept
+    by_group = lambda g: [e for e in ents() if group_for_key(key(e)) == g]  # noqa: E731
+    assert all(e.disabled_by is None for e in by_group("routing") + by_group("eq"))
+    assert all(e.disabled_by is not None for e in by_group("effects_fine"))
+    assert _state(hass, "switch.goxlr_route_mic_to_headphones").state == STATE_OFF
+
+    # Untick routing: hidden again; EQ untouched.
+    await _configure(hass, entry, {"eq"})
+    assert all(e.disabled_by is not None for e in by_group("routing"))
+    assert all(e.disabled_by is None for e in by_group("eq"))
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_every_entity_loads(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    """Enable every advanced group and check no entity errors."""
+    entry = await _setup(hass, daemon)
+    reg = er.async_get(hass)
+    await _configure(hass, entry, set(ADVANCED_GROUPS))
+    assert not [e for e in er.async_entries_for_config_entry(reg, entry.entry_id) if e.disabled_by]
 
     entries = er.async_entries_for_config_entry(reg, entry.entry_id)
     ids = {e.entity_id for e in entries}

@@ -148,8 +148,7 @@ async def async_setup_entry(
         UtilitySwitch(client, "tts", "Speak button presses", "tts_enabled",
                       "SetTTSEnabled", "mdi:account-voice"),
         UtilitySwitch(client, "open_ui_on_launch", "Open window on launch",
-                      "open_ui_on_launch", "SetUiLaunchOnLoad", "mdi:application-outline",
-                      enabled=False),
+                      "open_ui_on_launch", "SetUiLaunchOnLoad", "mdi:application-outline"),
     ])
 
     def build(client: GoXLRClient, serial: str, mixer: Mixer) -> list[Entity]:
@@ -252,14 +251,12 @@ class UtilitySwitch(GoXLRHubEntity, SwitchEntity):
     _attr_entity_category = CONFIG
 
     def __init__(
-        self, client: GoXLRClient, key: str, name: str, field: str, command: str, icon: str,
-        enabled: bool = True,
+        self, client: GoXLRClient, key: str, name: str, field: str, command: str, icon: str
     ) -> None:
         super().__init__(client, key, name)
         self._field = field
         self._command = command
         self._attr_icon = icon
-        self._attr_entity_registry_enabled_default = enabled
 
     @property
     def available(self) -> bool:

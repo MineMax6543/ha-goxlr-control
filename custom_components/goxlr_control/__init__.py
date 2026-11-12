@@ -9,6 +9,7 @@ from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
+from .advanced import apply_groups, enabled_groups
 from .client import GoXLRClient
 from .const import CONF_AUTO_RECONNECT, DOMAIN
 
@@ -46,6 +47,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoXLRConfigEntry) -> boo
         auto_reconnect=entry.options.get(CONF_AUTO_RECONNECT, True),
     )
     client.entry_id = entry.entry_id
+    client.advanced_groups = enabled_groups(entry)
     entry.runtime_data = client
     # Hub device for the Utility itself; always present, even with the PC off.
     hub = dr.async_get(hass).async_get_or_create(
@@ -62,7 +64,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: GoXLRConfigEntry) -> boo
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, client.async_run(), "goxlr_control_connection")
     entry.async_on_unload(client.async_stop)
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: GoXLRConfigEntry) -> None:
+    """Advanced groups changed in Configure: update the registry and reload.
+
+    Other options (auto reconnect, mic monitoring) also live in entry.options
+    and change at runtime; those must not trigger a reload.
+    """
+    old, new = entry.runtime_data.advanced_groups, enabled_groups(entry)
+    if old == new:
+        return
+    apply_groups(hass, entry, old, new)
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: GoXLRConfigEntry) -> bool:

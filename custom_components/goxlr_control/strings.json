@@ -55,5 +55,35 @@
         }
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Advanced controls",
+        "description": "Choose which groups of advanced controls to show. Turning a group on enables all of its entities, and turning it off hides them again. Groups you don't change keep any entities you enabled or disabled yourself.",
+        "data": {
+          "routing": "Routing matrix",
+          "mix_b": "Mix B (submix) details",
+          "eq": "Mic EQ",
+          "mic_timing": "Noise gate & compressor timing",
+          "effects_fine": "Effect fine-tuning",
+          "screens": "Fader screen extras",
+          "sampler_pads": "Sampler pad settings",
+          "lighting": "Lighting details",
+          "other": "Other rarely used"
+        },
+        "data_description": {
+          "routing": "One switch per input → output route (~45).",
+          "mix_b": "Per-channel Mix B volumes and links, and which mix each output uses. Only work while the 'Mix B (submix)' switch is on.",
+          "eq": "Gain and frequency for every EQ band.",
+          "mic_timing": "Attack and release for the noise gate and compressor.",
+          "effects_fine": "Reverb decay, echo delays and tempo, robot bands and the other deep effect parameters. The main amount and style controls are always on.",
+          "screens": "Number, icon and invert for the fader screens. The screen text is always on.",
+          "sampler_pads": "Playback mode and order for every pad in every bank, the pre-record buffer and the clear behaviour.",
+          "lighting": "Animation modifiers, waterfall direction and per-fader light styles.",
+          "other": "Mic level sensor (changes every second while you talk), VOD mode, effect preset rename, Utility log level, open window on launch."
+        }
+      }
+    }
   }
 }

@@ -8,10 +8,12 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .advanced import ADVANCED_GROUPS, CONF_ADVANCED_GROUPS
 from .client import GoXLRError, async_fetch_status
 from .const import DEFAULT_PORT, DOMAIN
 
@@ -29,6 +31,11 @@ def _schema(host: str = "", port: int = DEFAULT_PORT, **_: Any) -> vol.Schema:
 
 class GoXLRConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return GoXLROptionsFlow(config_entry)
 
     async def _validate(self, user_input: dict[str, Any]) -> str | None:
         try:
@@ -79,3 +86,25 @@ class GoXLRConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=_schema(entry.data[CONF_HOST], entry.data[CONF_PORT]),
             errors=errors,
         )
+
+
+class GoXLROptionsFlow(OptionsFlow):
+    """Configure: switch groups of advanced entities on or off."""
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        # Stored under our own name: works on HA versions before and after
+        # OptionsFlow.config_entry became a read-only property.
+        self._entry = entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        current = set(self._entry.options.get(CONF_ADVANCED_GROUPS, []))
+        if user_input is not None:
+            groups = sorted(g for g in ADVANCED_GROUPS if user_input.get(g))
+            # Keep the other options (auto reconnect, mic monitoring, ...).
+            return self.async_create_entry(
+                data={**self._entry.options, CONF_ADVANCED_GROUPS: groups}
+            )
+        schema = vol.Schema(
+            {vol.Optional(g, default=g in current): bool for g in ADVANCED_GROUPS}
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

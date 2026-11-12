@@ -55,8 +55,27 @@ You get two devices:
 Controls that only exist on the full-size GoXLR (effects, sampler, fader screens) aren't
 created for a Mini.
 
-Advanced controls are **disabled by default** to keep things tidy (marked *off* below).
-To enable them, open the device page, click *+N entities not shown*, and enable the ones you want.
+### Advanced controls (hidden by default)
+
+A full-size GoXLR has about 300 controls. To keep the device page usable, the
+fine-tuning ones (marked *off* below) are hidden until you ask for them, a whole group at a time:
+
+**Settings → Devices & services → GoXLR Control → Configure**
+
+| Group | What it adds |
+|---|---|
+| Routing matrix | One switch per input → output route (~45) |
+| Mix B (submix) details | Per-channel Mix B volumes and links, and which mix each output uses. These only work while **Mix B (submix)** is on. |
+| Mic EQ | Gain and frequency for every EQ band |
+| Noise gate & compressor timing | Attack and release |
+| Effect fine-tuning | Reverb decay, echo delays/tempo, robot bands, … (each effect's amount and style are always on) |
+| Fader screen extras | Number, icon, invert (the screen text is always on) |
+| Sampler pad settings | Playback mode and order per pad and bank, pre-record buffer, clear behaviour |
+| Lighting details | Animation modifiers, waterfall, per-fader light styles |
+| Other rarely used | Mic level sensor, VOD mode, preset rename, Utility log level, open window on launch |
+
+Turning a group on enables all of its entities, and turning it off hides them again.
+Groups you don't touch keep any entities you enabled or disabled yourself.
 
 ## Entities
 

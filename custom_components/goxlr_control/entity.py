@@ -10,6 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity, EntityDescription
 
+from .advanced import group_for_key
 from .client import GoXLRClient, GoXLRError
 from .const import DOMAIN
 
@@ -59,6 +60,14 @@ def mixer_device_info(client: GoXLRClient, serial: str) -> DeviceInfo:
     else:
         info["via_device"] = (DOMAIN, client.entry_id)
     return info
+
+
+def _apply_group_default(entity: Entity, client: GoXLRClient, key: str) -> None:
+    """Advanced entities start disabled unless their group is switched on."""
+    group = group_for_key(key)
+    entity._attr_entity_registry_enabled_default = (
+        group is None or group in client.advanced_groups
+    )
 
 
 class _GatedEntity(Entity):
@@ -115,6 +124,7 @@ class GoXLREntity(_GatedEntity):
             self._attr_name = name
         self._attr_unique_id = f"{serial}_{key}"
         self._attr_device_info = mixer_device_info(client, serial)
+        _apply_group_default(self, client, key)
 
     @property
     def mixer(self) -> Mixer:
@@ -153,6 +163,7 @@ class GoXLRHubEntity(_GatedEntity):
             self._attr_name = name
         self._attr_unique_id = f"{client.entry_id}_{key}"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, client.entry_id)})
+        _apply_group_default(self, client, key)
 
     @property
     def config(self) -> dict[str, Any]:
