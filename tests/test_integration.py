@@ -80,14 +80,19 @@ class FakeDaemon:
         elif "SetHardTuneEnabled" in cmd:
             set_(f"{base}/effects/current/hard_tune/is_enabled", cmd["SetHardTuneEnabled"])
         elif "SetGlobalColour" in cmd:
+            # Mirrors the Utility's Profile::set_global_colour: colour index 0 of
+            # every target except the encoders; fade meters get index 1 and
+            # index 0 goes black; secondary colours are left alone.
             c = cmd["SetGlobalColour"]
-            for group in ("faders", "buttons", "simple"):
-                for k, v in m["lighting"][group].items():
-                    for ck in v.get("colours", v):
-                        if ck.startswith("colour_"):
-                            target = v["colours"] if "colours" in v else v
-                            target[ck] = c
-            ops.append({"op": "replace", "path": f"{base}/lighting", "value": m["lighting"]})
+            light = m["lighting"]
+            for v in light["simple"].values():
+                v["colour_one"] = c
+            for group in ("buttons", "sampler"):
+                for v in light[group].values():
+                    v["colours"]["colour_one"] = c
+            for v in light["faders"].values():
+                v["colours"]["colour_one"], v["colours"]["colour_two"] = "000000", c
+            ops.append({"op": "replace", "path": f"{base}/lighting", "value": light})
         elif "LoadProfileColours" in cmd:
             fresh = status()["mixers"][SERIAL]["lighting"]
             set_(f"{base}/lighting", fresh)
@@ -315,16 +320,37 @@ async def test_lighting_light(hass: HomeAssistant, daemon: FakeDaemon) -> None:
     assert _state(hass, light).state == STATE_ON
     assert tuple(_state(hass, light).attributes["rgb_color"]) == (0, 255, 255)
 
-    await _call(hass, "light", "turn_on", light, rgb_color=[255, 0, 0], brightness=128)
-    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "800000"}]}
-
+    # Profile colours -> off -> on restores the profile's colour scheme.
     await _call(hass, "light", "turn_off", light)
     assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "000000"}]}
     await _until(hass, lambda: _state(hass, light).state == STATE_OFF, "off")
+    await _call(hass, "light", "turn_on", light)
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"LoadProfileColours": "Default"}]}
+    await _until(hass, lambda: _state(hass, light).state == STATE_ON, "back on (profile)")
 
-    # Lighting was uniform red before turning off -> restore that colour.
+    # A colour set from Home Assistant -> off -> on restores that colour.
+    await _call(hass, "light", "turn_on", light, rgb_color=[255, 0, 0], brightness=128)
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "800000"}]}
+    await _until(hass, lambda: _state(hass, light).attributes.get("brightness") == 128, "red")
+    await _call(hass, "light", "turn_off", light)
+    await _until(hass, lambda: _state(hass, light).state == STATE_OFF, "off again")
     await _call(hass, "light", "turn_on", light)
     assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "800000"}]}
+    await _until(hass, lambda: _state(hass, light).state == STATE_ON, "back on (colour)")
+
+    # The remembered colour survives a Home Assistant restart (reload).
+    await _call(hass, "light", "turn_off", light)
+    await _until(hass, lambda: _state(hass, light).state == STATE_OFF, "off before reload")
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await _until(hass, lambda: _state(hass, light).state == STATE_OFF, "reloaded")
+    await _call(hass, "light", "turn_on", light)
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "800000"}]}
+
+    # Brightness only, while off: uses the remembered colour, not white.
+    await _call(hass, "light", "turn_off", light)
+    await _until(hass, lambda: _state(hass, light).state == STATE_OFF, "off for brightness")
+    await _call(hass, "light", "turn_on", light, brightness=255)
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "FF0000"}]}
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 

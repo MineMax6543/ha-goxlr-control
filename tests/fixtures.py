@@ -54,9 +54,13 @@ MIXER = {
     "lighting": {
         "animation": {"supported": True, "mode": "None", "mod1": 50, "mod2": 50, "waterfall_direction": "Off"},
         "faders": {f: {"style": "Gradient", "colours": {"colour_one": "00FFFF", "colour_two": "FF00FF"}} for f in "ABCD"},
-        "buttons": {b: {"off_style": "Dimmed", "colours": {"colour_one": "00FFFF", "colour_two": "000000"}} for b in _BUTTONS},
+        "buttons": {b: {"off_style": "Dimmed", "colours": {"colour_one": "00FFFF", "colour_two": "003333"}} for b in _BUTTONS},
         "simple": {t: {"colour_one": "00FFFF"} for t in ["Global", "Accent", "Scribble1", "Scribble2", "Scribble3", "Scribble4"]},
-        "sampler": {}, "encoders": {},
+        "sampler": {t: {"off_style": "Dimmed", "colours": {"colour_one": "00FFFF", "colour_two": "003333", "colour_three": "FFFFFF"}}
+                    for t in ["SamplerSelectA", "SamplerSelectB", "SamplerSelectC"]},
+        # The effect knob rings: the Utility's SetGlobalColour never touches these.
+        "encoders": {t: {"colour_one": "FF0000", "colour_two": "00FF00", "colour_three": "0000FF"}
+                     for t in ["Reverb", "Pitch", "Echo", "Gender"]},
     },
     "effects": {
         "is_enabled": True, "active_preset": "Preset1",

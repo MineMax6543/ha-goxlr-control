@@ -124,7 +124,7 @@ When it's off, nothing is polled.
 ### Lighting and screens
 | Entity | Notes |
 |---|---|
-| Lighting (light) | Set a colour or brightness to colour the whole device. Off turns all LEDs black. On restores the previous colour, or your profile's colour scheme if it had several colours. |
+| Lighting (light) | Set a colour or brightness to colour the whole device. Off turns the LEDs black. On restores what was there before: the colour you last set from Home Assistant, or otherwise the colours **saved** in your profile. (Don't save the profile while the lights are off, or "on" will restore black.) The `turn_on_restores` attribute shows which one will happen. |
 | Restore profile lighting | Reloads the profile's colours |
 | Lighting animation | Rainbow retro / bright / dark, Simple, Ripple (Ripple isn't available on the Mini) |
 | Lighting waterfall, gradient mod 1 / 2, Fader *X* light style | (*off*). These show as unavailable when the current animation mode doesn't use them. |
