@@ -1,7 +1,6 @@
 """End-to-end tests against a fake GoXLR Utility daemon."""
 
 import asyncio
-import copy
 import json
 
 from aiohttp import web
@@ -11,42 +10,27 @@ from homeassistant import config_entries
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.event import async_track_state_change_event
 
-from custom_components.goxlr_control import client as client_mod
+from custom_components.goxlr_control import client as client_mod, mic_monitor
 from custom_components.goxlr_control.const import DOMAIN
 
-STATUS = {
-    "mixers": {
-        "S220202153DI7": {
-            "hardware": {"device_type": "Full", "versions": {"firmware": [1, 5, 0, 22]}},
-            "fader_status": {
-                f: {"channel": ch, "mute_type": "All", "mute_state": "Unmuted"}
-                for f, ch in zip("ABCD", ["Mic", "Music", "Chat", "System"])
-            },
-            "levels": {"volumes": {"Mic": 255, "Music": 128, "Headphones": 200}},
-            "router": {"Microphone": {"Headphones": False, "BroadcastMix": True}},
-            "cough_button": {"is_toggle": False, "mute_type": "All", "state": "Unmuted"},
-            "effects": {
-                "is_enabled": True,
-                "active_preset": "Preset1",
-                "preset_names": {"Preset1": "Clean", "Preset2": "Deep"},
-                "current": {"megaphone": {"is_enabled": False}, "robot": {"is_enabled": False}, "hard_tune": {"is_enabled": False}},
-            },
-            "profile_name": "Default",
-            "mic_profile_name": "DEFAULT",
-        }
-    },
-    "files": {"profiles": ["Default", "Streaming"], "mic_profiles": ["DEFAULT"]},
-}
-SERIAL = "S220202153DI7"
+from .fixtures import SERIAL, status
 
 
 class FakeDaemon:
     def __init__(self):
-        self.status = copy.deepcopy(STATUS)
+        self.status = status()
         self.sockets: list[web.WebSocketResponse] = []
         self.commands: list = []
         self.up = True
+        self.mic_level = -60.0
+
+    @property
+    def mixer(self):
+        return self.status["mixers"][SERIAL]
 
     async def ws(self, request):
         if not self.up:
@@ -56,7 +40,12 @@ class FakeDaemon:
         self.sockets.append(ws)
         async for msg in ws:
             req = json.loads(msg.data)
-            data = {"Status": self.status} if req["data"] == "GetStatus" else "Ok"
+            if req["data"] == "GetStatus":
+                data = {"Status": self.status}
+            elif isinstance(req["data"], dict) and "GetMicLevel" in req["data"]:
+                data = {"MicLevel": self.mic_level}
+            else:
+                data = "Ok"
             await ws.send_json({"id": req["id"], "data": data})
         return ws
 
@@ -66,24 +55,49 @@ class FakeDaemon:
     async def command(self, request):
         body = await request.json()
         self.commands.append(body)
+        if "Command" not in body:
+            return web.json_response("Ok")
         _, cmd = body["Command"]
-        ops = []
-        mixer = self.status["mixers"][SERIAL]
+        m, ops = self.mixer, []
+
+        def set_(path, value):
+            node = self.status
+            parts = path.strip("/").split("/")
+            for p in parts[:-1]:
+                node = node[p]
+            node[parts[-1]] = value
+            ops.append({"op": "replace", "path": path, "value": value})
+
+        base = f"/mixers/{SERIAL}"
         if "SetVolume" in cmd:
             ch, v = cmd["SetVolume"]
-            mixer["levels"]["volumes"][ch] = v
-            ops.append({"op": "replace", "path": f"/mixers/{SERIAL}/levels/volumes/{ch}", "value": v})
-        if "SetFaderMuteState" in cmd:
+            set_(f"{base}/levels/volumes/{ch}", v)
+        elif "SetFaderMuteState" in cmd:
             f, s = cmd["SetFaderMuteState"]
-            mixer["fader_status"][f]["mute_state"] = s
-            ops.append({"op": "replace", "path": f"/mixers/{SERIAL}/fader_status/{f}/mute_state", "value": s})
-        if "LoadProfile" in cmd:
-            mixer["profile_name"] = cmd["LoadProfile"][0]
-            ops.append({"op": "replace", "path": f"/mixers/{SERIAL}/profile_name", "value": mixer["profile_name"]})
+            set_(f"{base}/fader_status/{f}/mute_state", s)
+        elif "LoadProfile" in cmd:
+            set_(f"{base}/profile_name", cmd["LoadProfile"][0])
+        elif "SetHardTuneEnabled" in cmd:
+            set_(f"{base}/effects/current/hard_tune/is_enabled", cmd["SetHardTuneEnabled"])
+        elif "SetGlobalColour" in cmd:
+            c = cmd["SetGlobalColour"]
+            for group in ("faders", "buttons", "simple"):
+                for k, v in m["lighting"][group].items():
+                    for ck in v.get("colours", v):
+                        if ck.startswith("colour_"):
+                            target = v["colours"] if "colours" in v else v
+                            target[ck] = c
+            ops.append({"op": "replace", "path": f"{base}/lighting", "value": m["lighting"]})
+        elif "LoadProfileColours" in cmd:
+            fresh = status()["mixers"][SERIAL]["lighting"]
+            set_(f"{base}/lighting", fresh)
+        await self.push(ops)
+        return web.json_response("Ok")
+
+    async def push(self, ops):
         for ws in self.sockets:
             if not ws.closed:
                 await ws.send_json({"id": 2**64 - 1, "data": {"Patch": ops}})
-        return web.json_response("Ok")
 
     async def drop(self):
         self.up = False
@@ -97,6 +111,8 @@ async def daemon(socket_enabled, monkeypatch):
     monkeypatch.setattr(client_mod, "BACKOFF_MIN", 0.1)
     monkeypatch.setattr(client_mod, "BACKOFF_MAX", 0.2)
     monkeypatch.setattr(client_mod, "NOTIFY_DELAY", 0)
+    monkeypatch.setattr(mic_monitor, "MIC_POLL_INTERVAL", 0.05)
+    monkeypatch.setattr(mic_monitor, "MIC_SPEAKING_RELEASE", 0.3)
     d = FakeDaemon()
     app = web.Application()
     app.router.add_get("/api/websocket", d.ws)
@@ -120,8 +136,7 @@ async def _until(hass, cond, what, timeout=5):
     raise AssertionError(f"timed out: {what}")
 
 
-async def test_full_flow(hass: HomeAssistant, daemon: FakeDaemon) -> None:
-    # Config flow
+async def _setup(hass, daemon):
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.flow.async_configure(
@@ -129,39 +144,249 @@ async def test_full_flow(hass: HomeAssistant, daemon: FakeDaemon) -> None:
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
+    await _until(hass, lambda: any(e.entity_id.endswith("mic_volume") and (s := hass.states.get(e.entity_id)) and s.state == "100" for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)), "entities")
+    return entry
 
+
+async def _call(hass, domain, service, entity_id, **data):
+    await hass.services.async_call(domain, service, {"entity_id": entity_id, **data}, blocking=True)
+
+
+def _device(hass, entry, ident):
+    """Find our device by identifier (works on old and new HA versions)."""
+    return next(
+        d for d in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+        if (DOMAIN, ident) in d.identifiers
+    )
+
+
+def _state(hass, entity_id):
+    s = hass.states.get(entity_id)
+    assert s is not None, f"missing {entity_id}"
+    return s
+
+
+async def test_core_controls_and_recovery(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    entry = await _setup(hass, daemon)
     vol = "number.goxlr_mic_volume"
-    await _until(hass, lambda: hass.states.get(vol) is not None and hass.states.get(vol).state == "100", "entities")
 
-    assert hass.states.get("number.goxlr_music_volume").state == "50"
-    assert hass.states.get("switch.goxlr_fader_a_mute").state == STATE_OFF
-    assert hass.states.get("switch.goxlr_fader_a_mute").attributes["channel"] == "Mic"
-    assert hass.states.get("select.goxlr_profile").state == "Default"
-    assert hass.states.get("select.goxlr_effect_preset").state == "1: Clean"
-    assert hass.states.get("switch.goxlr_effects").state == STATE_ON
-    assert hass.states.get("binary_sensor.goxlr_utility_connection").state == STATE_ON
+    assert _state(hass, "number.goxlr_music_volume").state == "50"
+    assert _state(hass, "switch.goxlr_fader_a_mute").state == STATE_OFF
+    assert _state(hass, "switch.goxlr_fader_a_mute").attributes["channel"] == "Mic"
+    assert _state(hass, "select.goxlr_profile").state == "Default"
+    assert _state(hass, "select.goxlr_effect_preset").state == "1: Clean"
+    assert _state(hass, "switch.goxlr_effects").state == STATE_ON
+    assert _state(hass, "binary_sensor.goxlr_utility_connection").state == STATE_ON
+    assert _state(hass, "sensor.goxlr_utility_utility_version").state == "1.2.3"
+    fw = _state(hass, "update.goxlr_firmware")
+    assert fw.state == STATE_ON  # 1.3.40.0 installed, 1.5.0.22 available
+    assert fw.attributes["installed_version"] == "1.3.40.0"
 
-    # Controls round-trip through the daemon and come back as patches
-    await hass.services.async_call("number", "set_value", {"entity_id": vol, "value": 40}, blocking=True)
+    await _call(hass, "number", "set_value", vol, value=40)
     assert daemon.commands[-1] == {"Command": [SERIAL, {"SetVolume": ["Mic", 102]}]}
-    await _until(hass, lambda: hass.states.get(vol).state == "40", "volume patch")
+    await _until(hass, lambda: _state(hass, vol).state == "40", "volume patch")
 
-    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.goxlr_fader_a_mute"}, blocking=True)
-    await _until(hass, lambda: hass.states.get("switch.goxlr_fader_a_mute").state == STATE_ON, "mute patch")
+    await _call(hass, "switch", "turn_on", "switch.goxlr_fader_a_mute")
+    await _until(hass, lambda: _state(hass, "switch.goxlr_fader_a_mute").state == STATE_ON, "mute")
 
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.goxlr_profile", "option": "Streaming"}, blocking=True)
+    await _call(hass, "select", "select_option", "select.goxlr_profile", option="Streaming")
     assert daemon.commands[-1] == {"Command": [SERIAL, {"LoadProfile": ["Streaming", True]}]}
-    await _until(hass, lambda: hass.states.get("select.goxlr_profile").state == "Streaming", "profile patch")
 
-    # Daemon goes away (PC asleep / Utility restarted) -> unavailable, then recovers
+    await _call(hass, "select", "select_option", "select.goxlr_compressor_ratio", option="4.0:1")
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetCompressorRatio": "Ratio4_0"}]}
+
+    await _call(hass, "button", "press", "button.goxlr_save_profile")
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SaveProfile": []}]}
+
+    await _call(hass, "button", "press", "button.goxlr_play_top_left_sample")
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"PlayNextSample": ["A", "TopLeft"]}]}
+    # Pad without samples can't be played.
+    assert _state(hass, "button.goxlr_play_top_right_sample").state == STATE_UNAVAILABLE
+
+    await _call(hass, "text", "set_value", "text.goxlr_fader_a_screen_text", value="ON AIR")
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetScribbleText": ["A", "ON AIR"]}]}
+
+    await _call(hass, "button", "press", "button.goxlr_utility_open_utility_window")
+    assert daemon.commands[-1] == {"Daemon": "OpenUi"}
+
+    await _call(hass, "switch", "turn_off", "switch.goxlr_utility_start_on_login")
+    assert daemon.commands[-1] == {"Daemon": {"SetAutoStartEnabled": False}}
+
+    # Outage and recovery.
     await daemon.drop()
-    await _until(hass, lambda: hass.states.get(vol).state == STATE_UNAVAILABLE, "unavailable")
-    assert hass.states.get("binary_sensor.goxlr_utility_connection").state == STATE_OFF
-    daemon.status["mixers"][SERIAL]["levels"]["volumes"]["Mic"] = 0
+    await _until(hass, lambda: _state(hass, vol).state == STATE_UNAVAILABLE, "unavailable")
+    daemon.mixer["levels"]["volumes"]["Mic"] = 0
     daemon.up = True
-    await _until(hass, lambda: hass.states.get(vol).state == "0", "recovery with fresh state")
-    assert hass.states.get("binary_sensor.goxlr_utility_connection").state == STATE_ON
+    await _until(hass, lambda: _state(hass, vol).state == "0", "recovery with fresh state")
 
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_every_entity_loads(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    """Enable every (also disabled-by-default) entity and check none errors."""
+    entry = await _setup(hass, daemon)
+    reg = er.async_get(hass)
+    entries = er.async_entries_for_config_entry(reg, entry.entry_id)
+    for e in entries:
+        if e.disabled_by is not None:
+            reg.async_update_entity(e.entity_id, disabled_by=None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await _until(hass, lambda: _state(hass, "number.goxlr_mic_volume").state == "100", "reload")
+
+    entries = er.async_entries_for_config_entry(reg, entry.entry_id)
+    ids = {e.entity_id for e in entries}
+    unavailable = sorted(i for i in ids if hass.states.get(i) is None or hass.states.get(i).state == STATE_UNAVAILABLE)
+    # Only things that are legitimately off in this fixture may be unavailable:
+    # mix B (submix disabled), mic level (monitoring off), animation params (mode None),
+    # and pads without samples.
+    allowed = ("mix_b", "source_mix", "speaking", "mic_level", "gradient_mod", "waterfall", "_sample")
+    unexpected = [i for i in unavailable if not any(a in i for a in allowed)]
+    assert not unexpected, unexpected
+    print(f"\n{len(ids)} entities, {len(unavailable)} legitimately unavailable")
+    assert len(ids) > 200
+
+    # Mixer device hangs off the Utility hub device.
+    dev = _device(hass, entry, SERIAL)
+    hub = _device(hass, entry, entry.entry_id)
+    assert dev.via_device_id == hub.id
+    assert dev.sw_version == "1.3.40.0"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_mic_monitoring_and_speaking(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    entry = await _setup(hass, daemon)
+    speaking = "binary_sensor.goxlr_speaking"
+    assert _state(hass, speaking).state == STATE_UNAVAILABLE  # opt-in: off by default
+    assert not any(isinstance(c, dict) and "GetMicLevel" in str(c) for c in daemon.commands)
+
+    await _call(hass, "switch", "turn_on", "switch.goxlr_mic_level_monitoring")
+    assert entry.options[f"mic_level_monitoring_{SERIAL}"] is True
+    await _until(hass, lambda: _state(hass, speaking).state == STATE_OFF, "quiet")
+
+    daemon.mic_level = -20.0  # above default threshold (-40)
+    await _until(hass, lambda: _state(hass, speaking).state == STATE_ON, "speaking")
+    daemon.mic_level = -60.0
+    await _until(hass, lambda: _state(hass, speaking).state == STATE_OFF, "released")
+
+    # Raise the threshold so -30 no longer counts as speaking.
+    await _call(hass, "number", "set_value", "number.goxlr_speaking_threshold", value=-25)
+    daemon.mic_level = -30.0
+    await asyncio.sleep(0.4)
+    await hass.async_block_till_done()
+    assert _state(hass, speaking).state == STATE_OFF
+
+    await _call(hass, "switch", "turn_off", "switch.goxlr_mic_level_monitoring")
+    await _until(hass, lambda: _state(hass, speaking).state == STATE_UNAVAILABLE, "monitor off")
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_button_events(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    entry = await _setup(hass, daemon)
+    ent = "event.goxlr_sampler_top_left_button"
+    fired: list[str] = []
+    async_track_state_change_event(
+        hass, [ent], lambda ev: fired.append(ev.data["new_state"].attributes.get("event_type"))
+    )
+    path = f"/mixers/{SERIAL}/button_down/SamplerTopLeft"
+
+    # Quick tap: pressed + released inside one patch burst must not be lost.
+    await daemon.push([{"op": "replace", "path": path, "value": True}])
+    await daemon.push([{"op": "replace", "path": path, "value": False}])
+    await _until(hass, lambda: len(fired) >= 3, "tap events")
+    assert fired == ["pressed", "released", "short_press"]
+
+    fired.clear()
+    await daemon.push([{"op": "replace", "path": path, "value": True}])
+    await asyncio.sleep(0.7)  # mute hold duration is 500 ms
+    await daemon.push([{"op": "replace", "path": path, "value": False}])
+    await _until(hass, lambda: len(fired) >= 3, "hold events")
+    assert fired == ["pressed", "long_press", "released"]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_lighting_light(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    entry = await _setup(hass, daemon)
+    light = "light.goxlr_lighting"
+    assert _state(hass, light).state == STATE_ON
+    assert tuple(_state(hass, light).attributes["rgb_color"]) == (0, 255, 255)
+
+    await _call(hass, "light", "turn_on", light, rgb_color=[255, 0, 0], brightness=128)
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "800000"}]}
+
+    await _call(hass, "light", "turn_off", light)
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "000000"}]}
+    await _until(hass, lambda: _state(hass, light).state == STATE_OFF, "off")
+
+    # Lighting was uniform red before turning off -> restore that colour.
+    await _call(hass, "light", "turn_on", light)
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetGlobalColour": "800000"}]}
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_rules_and_dynamic_ranges(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    entry = await _setup(hass, daemon)
+    pitch = "number.goxlr_pitch_amount"
+    assert _state(hass, pitch).attributes["min"] == -24
+    await _call(hass, "switch", "turn_on", "switch.goxlr_hard_tune")
+    # With Hard tune on, Wide pitch is limited to +/-2 octave steps.
+    await _until(hass, lambda: _state(hass, pitch).attributes["max"] == 2, "pitch range")
+
+    # Mic mute in Hold mode gives a helpful error instead of a daemon failure.
+    daemon.mixer["cough_button"]["is_toggle"] = False
+    await daemon.push([{"op": "replace", "path": f"/mixers/{SERIAL}/cough_button/is_toggle", "value": False}])
+    await _until(hass, lambda: _state(hass, "select.goxlr_mic_mute_button_mode").state == "Hold", "hold")
+    with pytest.raises(HomeAssistantError, match="Hold mode"):
+        await _call(hass, "switch", "turn_on", "switch.goxlr_mic_mute")
+
+    # Raw command action reaches anything without an entity.
+    dev = _device(hass, entry, SERIAL)
+    resp = await hass.services.async_call(
+        DOMAIN, "send_command",
+        {"device_id": dev.id, "command": {"SetFaderColours": ["A", "FF0000", "000000"]}},
+        blocking=True, return_response=True,
+    )
+    assert resp == {"result": "Ok"}
+    assert daemon.commands[-1] == {"Command": [SERIAL, {"SetFaderColours": ["A", "FF0000", "000000"]}]}
+    await hass.services.async_call(
+        DOMAIN, "send_utility_command", {"command": {"SetSampleGainPct": ["intro.wav", 80]}},
+        blocking=True,
+    )
+    assert daemon.commands[-1] == {"Daemon": {"SetSampleGainPct": ["intro.wav", 80]}}
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_auto_reconnect_toggle(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    entry = await _setup(hass, daemon)
+    conn = "binary_sensor.goxlr_utility_connection"
+    toggle = "switch.goxlr_utility_auto_reconnect"
+    assert _state(hass, toggle).state == STATE_ON
+
+    await _call(hass, "switch", "turn_off", toggle)
+    assert entry.options["auto_reconnect"] is False
+    assert _state(hass, conn).state == STATE_ON
+
+    await daemon.drop()
+    await _until(hass, lambda: _state(hass, conn).state == STATE_OFF, "disconnected")
+    daemon.up = True
+    await asyncio.sleep(1.5)
+    await hass.async_block_till_done()
+    assert _state(hass, conn).state == STATE_OFF
+    assert _state(hass, toggle).state == STATE_OFF
+
+    await _call(hass, "switch", "turn_on", toggle)
+    await _until(hass, lambda: _state(hass, conn).state == STATE_ON, "reconnected", timeout=2)
+
+    await _call(hass, "switch", "turn_off", toggle)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert _state(hass, toggle).state == STATE_OFF
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
@@ -172,39 +397,20 @@ async def test_cannot_connect(hass: HomeAssistant, socket_enabled) -> None:
     assert result["errors"] == {"base": "cannot_connect"}
 
 
-async def test_auto_reconnect_toggle(hass: HomeAssistant, daemon: FakeDaemon) -> None:
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"host": "127.0.0.1", "port": daemon.port}
-    )
-    entry = result["result"]
-    conn = "binary_sensor.goxlr_utility_connection"
-    toggle = "switch.goxlr_utility_auto_reconnect"
-    await _until(hass, lambda: hass.states.get(conn).state == STATE_ON, "connected")
-    assert hass.states.get(toggle).state == STATE_ON
-
-    # Turn off retrying: stays connected while the PC is up...
-    await hass.services.async_call("switch", "turn_off", {"entity_id": toggle}, blocking=True)
-    assert entry.options["auto_reconnect"] is False
-    assert hass.states.get(conn).state == STATE_ON
-
-    # ...but once the PC goes away it does not come back on its own.
-    await daemon.drop()
-    await _until(hass, lambda: hass.states.get(conn).state == STATE_OFF, "disconnected")
-    daemon.up = True
-    await asyncio.sleep(1.5)  # many backoff periods (0.1-0.2 s in tests)
-    await hass.async_block_till_done()
-    assert hass.states.get(conn).state == STATE_OFF
-    assert hass.states.get(toggle).state == STATE_OFF  # toggle itself stays usable
-
-    # Turning it back on reconnects immediately.
-    await hass.services.async_call("switch", "turn_on", {"entity_id": toggle}, blocking=True)
-    await _until(hass, lambda: hass.states.get(conn).state == STATE_ON, "reconnected", timeout=2)
-
-    # Setting survives a reload (= HA restart).
-    await hass.services.async_call("switch", "turn_off", {"entity_id": toggle}, blocking=True)
-    assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
-    assert hass.states.get(toggle).state == STATE_OFF
+async def test_goxlr_mini(hass: HomeAssistant, daemon: FakeDaemon) -> None:
+    """The Mini has no effects, sampler or screens: those entities must not exist."""
+    m = daemon.mixer
+    m["hardware"]["device_type"] = "Mini"
+    m["effects"] = None
+    m["sampler"] = None
+    for f in m["fader_status"].values():
+        f["scribble"] = None
+    entry = await _setup(hass, daemon)
+    ids = {e.entity_id for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)}
+    assert not [i for i in ids if any(k in i for k in ("effect", "reverb", "robot", "sampler", "screen", "megaphone"))]
+    events = sorted(i for i in ids if i.startswith("event."))
+    assert len(events) == 6, events
+    assert "number.goxlr_mini_eq_90_hz_gain" in ids
+    assert _state(hass, "number.goxlr_mini_mic_volume").state == "100"
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

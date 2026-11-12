@@ -1,0 +1,24 @@
+send_command:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: goxlr_control
+    command:
+      required: true
+      example: '{"SetScribbleText": ["A", "ON AIR"]}'
+      selector:
+        object:
+send_utility_command:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: goxlr_control
+    command:
+      required: true
+      example: '{"SetSampleGainPct": ["intro.wav", 80]}'
+      selector:
+        object:

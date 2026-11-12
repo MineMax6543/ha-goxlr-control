@@ -4,11 +4,17 @@
       "user": {
         "title": "Connect to GoXLR Utility",
         "description": "Enter the IP address or hostname of the PC running the GoXLR Utility. In the Utility, network access must be enabled so it listens on more than localhost.",
-        "data": { "host": "Host", "port": "Port" }
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
       },
       "reconfigure": {
         "title": "Update GoXLR Utility address",
-        "data": { "host": "Host", "port": "Port" }
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
       }
     },
     "error": {
@@ -18,6 +24,36 @@
     "abort": {
       "already_configured": "This GoXLR Utility is already configured",
       "reconfigure_successful": "Address updated"
+    }
+  },
+  "services": {
+    "send_command": {
+      "name": "Send GoXLR command",
+      "description": "Sends any raw command to a GoXLR, for features without a dedicated entity. Command names and arguments follow the GoXLR Utility API, e.g. {\"SetScribbleText\": [\"A\", \"ON AIR\"]}.",
+      "fields": {
+        "device_id": {
+          "name": "GoXLR",
+          "description": "The GoXLR (mixer) device to send the command to."
+        },
+        "command": {
+          "name": "Command",
+          "description": "The command as JSON/YAML, e.g. {\"SetFaderColours\": [\"A\", \"FF0000\", \"000000\"]}."
+        }
+      }
+    },
+    "send_utility_command": {
+      "name": "Send GoXLR Utility command",
+      "description": "Sends any raw command to the GoXLR Utility app itself (app-level settings), e.g. {\"SetSampleGainPct\": [\"intro.wav\", 80]}.",
+      "fields": {
+        "config_entry_id": {
+          "name": "GoXLR Utility",
+          "description": "Which Utility to use. Optional when only one is set up."
+        },
+        "command": {
+          "name": "Command",
+          "description": "The Utility command as JSON/YAML."
+        }
+      }
     }
   }
 }

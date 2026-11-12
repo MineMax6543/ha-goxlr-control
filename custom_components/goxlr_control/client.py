@@ -87,6 +87,9 @@ class GoXLRClient:
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._stopping = False
         self.entry_id = ""  # set by the integration setup
+        self.hub_device_id: str | None = None  # set by the integration setup
+        self._pending: dict[int, asyncio.Future[Any]] = {}
+        self._patch_listeners: set[Callable[[list[dict[str, Any]]], None]] = set()
 
     # ------------------------------------------------------------------ API
     def mixer(self, serial: str) -> dict[str, Any] | None:
@@ -113,11 +116,42 @@ class GoXLRClient:
             cb(serial)
         return lambda: self._mixer_listeners.discard(cb)
 
-    async def async_command(self, serial: str, command: dict[str, Any]) -> None:
+    @callback
+    def async_add_patch_listener(
+        self, cb: Callable[[list[dict[str, Any]]], None]
+    ) -> CALLBACK_TYPE:
+        """Call `cb(ops)` synchronously for every applied patch (not coalesced).
+
+        Used for physical button events, where a fast tap must never be lost
+        to the notification debounce.
+        """
+        self._patch_listeners.add(cb)
+        return lambda: self._patch_listeners.discard(cb)
+
+    async def async_command(self, serial: str, command: Any) -> Any:
         """Send a GoXLRCommand to one mixer over HTTP."""
-        result = await self._request({"Command": [serial, command]})
-        if isinstance(result, dict) and "Error" in result:
-            raise GoXLRError(str(result["Error"]))
+        return _check(await self._request({"Command": [serial, command]}))
+
+    async def async_utility_command(self, command: Any) -> Any:
+        """Send a DaemonCommand (Utility-level setting) over HTTP."""
+        return _check(await self._request({"Daemon": command}))
+
+    async def async_ws_request(self, data: Any, timeout: float = 2.0) -> Any:
+        """Request/response over the live websocket (cheap; used for polling)."""
+        ws = self._ws
+        if ws is None or ws.closed or not self.connected:
+            raise GoXLRError("not connected")
+        req_id = next(self._ids)
+        fut: asyncio.Future[Any] = self._hass.loop.create_future()
+        self._pending[req_id] = fut
+        try:
+            await ws.send_json({"id": req_id, "data": data})
+            async with asyncio.timeout(timeout):
+                return _check(await fut)
+        except (aiohttp.ClientError, ConnectionError, TimeoutError) as err:
+            raise GoXLRError(f"request failed: {err!r}") from err
+        finally:
+            self._pending.pop(req_id, None)
 
     @callback
     def set_auto_reconnect(self, enabled: bool) -> None:
@@ -145,6 +179,7 @@ class GoXLRClient:
                 _LOGGER.debug("GoXLR connection to %s ended: %r", self._base, err)
             finally:
                 self._ws = None
+                self._fail_pending()
                 self._set_connected(False)
             if self._stopping:
                 break
@@ -246,7 +281,14 @@ class GoXLRClient:
             payload = json_loads(raw)
         except ValueError:
             return
-        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return
+        data = payload.get("data")
+        fut = self._pending.pop(payload.get("id"), None)
+        if fut is not None:
+            if not fut.done():
+                fut.set_result(data)
+            return
         if not isinstance(data, dict):
             return  # "Ok" etc.
         if "Status" in data:
@@ -264,10 +306,19 @@ class GoXLRClient:
                 _LOGGER.debug("Patch failed (%s), resyncing", err)
                 self._resync_requested = True
                 return
+            for cb in list(self._patch_listeners):
+                cb(data["Patch"])
             self._mixers_changed()
             self._schedule_notify()
         elif "Error" in data:
             _LOGGER.debug("GoXLR Utility error: %s", data["Error"])
+
+    @callback
+    def _fail_pending(self) -> None:
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(GoXLRError("connection lost"))
+        self._pending.clear()
 
     @callback
     def _mixers_changed(self) -> None:
@@ -299,6 +350,13 @@ class GoXLRClient:
         self._notify_handle = None
         for cb in list(self._listeners):
             cb()
+
+
+def _check(result: Any) -> Any:
+    """Raise if the daemon answered with DaemonResponse::Error."""
+    if isinstance(result, dict) and "Error" in result:
+        raise GoXLRError(str(result["Error"]))
+    return result
 
 
 # ------------------------------------------------------------- JSON patch
