@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to GoXLR Utility",
+        "description": "Enter the IP address or hostname of the PC running the GoXLR Utility. In the Utility, network access must be enabled so it listens on more than localhost.",
+        "data": { "host": "Host", "port": "Port" }
+      },
+      "reconfigure": {
+        "title": "Update GoXLR Utility address",
+        "data": { "host": "Host", "port": "Port" }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the GoXLR Utility. Check the address, that the Utility is running, and that network access is enabled.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This GoXLR Utility is already configured",
+      "reconfigure_successful": "Address updated"
+    }
+  }
+}
