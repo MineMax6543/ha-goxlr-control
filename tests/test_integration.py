@@ -489,3 +489,16 @@ async def test_goxlr_mini(hass: HomeAssistant, daemon: FakeDaemon) -> None:
     assert _state(hass, "number.goxlr_mini_mic_volume").state == "100"
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_brand_images_served(hass: HomeAssistant, hass_client, socket_enabled) -> None:
+    """Home Assistant serves our bundled icon and logo (no brands-repo PR needed)."""
+    from homeassistant.setup import async_setup_component
+
+    assert await async_setup_component(hass, "brands", {})
+    client = await hass_client()
+    for image in ("icon.png", "icon@2x.png", "logo.png", "dark_logo.png"):
+        resp = await client.get(f"/api/brands/integration/{DOMAIN}/{image}")
+        assert resp.status == 200, image
+        assert resp.content_type == "image/png"
+        assert (await resp.read())[:8] == b"\x89PNG\r\n\x1a\n"

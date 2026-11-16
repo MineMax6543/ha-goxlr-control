@@ -1,4 +1,4 @@
-"""Constants for GoXLR Control.
+"""Constants for GoXLR Control Plus.
 
 Every option list and range here comes from the GoXLR Utility source
 (goxlr-types / profile crates), so values sent are always accepted.

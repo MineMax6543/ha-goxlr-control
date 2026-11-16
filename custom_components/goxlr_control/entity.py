@@ -1,4 +1,4 @@
-"""Base entities and small helpers for GoXLR Control."""
+"""Base entities and small helpers for GoXLR Control Plus."""
 
 from __future__ import annotations
 

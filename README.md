@@ -1,207 +1,89 @@
-# GoXLR Control for Home Assistant
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="custom_components/goxlr_control/brand/dark_logo@2x.png">
+    <img alt="GoXLR Control Plus" src="custom_components/goxlr_control/brand/logo@2x.png" width="460">
+  </picture>
+</p>
 
-Local-push control of a TC-Helicon GoXLR / GoXLR Mini through the
-[GoXLR Utility](https://github.com/GoXLR-on-Linux/goxlr-utility) on Windows or Linux.
-It covers everything the Utility exposes: mixing, routing, mic processing, effects,
-the sampler, lighting, the fader screens, profiles, physical button presses and the
-Utility's own settings.
+<p align="center">
+  Control your GoXLR or GoXLR Mini from Home Assistant, reliably.<br>
+  <a href="https://github.com/MineMax6543/ha-goxlr-control/releases"><img alt="Release" src="https://img.shields.io/github/v/release/MineMax6543/ha-goxlr-control"></a>
+  <a href="https://hacs.xyz"><img alt="HACS custom" src="https://img.shields.io/badge/HACS-custom-41BDF5"></a>
+</p>
 
-It doesn't need any Python libraries beyond what Home Assistant already ships, and it uses
-no polling. The one exception is the opt-in mic level monitoring described below.
+---
 
-## Why this one doesn't lose control after a few days
+GoXLR Control Plus talks to the [GoXLR Utility](https://github.com/GoXLR-on-Linux/goxlr-utility)
+on your Windows or Linux PC. Changes reach Home Assistant instantly (no polling), and it
+**never silently loses the connection**, even after days of uptime, PC sleep or Utility restarts.
 
-| Problem | What this integration does |
-|---|---|
-| The websocket silently dies (PC sleeps, Wi-Fi blip, router drops idle TCP) and the client never notices | WS ping/pong heartbeat every 20 s **and** an app-level watchdog: no traffic for 60 s means the connection is torn down and rebuilt |
-| The daemon restarts or the PC reboots | A supervisor loop reconnects with capped backoff (1 s up to 30 s). Setup never fails because the PC is off. |
-| The Utility drops state updates for clients that fall behind, so the state drifts | Full resync on every reconnect, whenever a patch can't be applied, and every 5 minutes |
-| Commands fail while the push channel is reconnecting | Commands use plain HTTP, independent of the websocket |
-| The GoXLR is unplugged or plugged in later | Entities go unavailable and come back; newly connected mixers get their entities created on the fly |
-
-It also stays light with ~300 entities: an entity writes its state only when *its own*
-value changed, so turning one knob doesn't rewrite every entity.
-
-## Requirements
-
-1. GoXLR Utility running on the PC.
-2. **Network access enabled** in the Utility. Turn on *Allow Network Access* in the Utility
-   settings and restart the Utility. Otherwise it only listens on `localhost`. You can also
-   enable it from the PC itself:
-   ```sh
-   curl -X POST -H 'Content-Type: application/json' \
-     -d '{"Daemon":{"SetAllowNetworkAccess":true}}' http://localhost:14564/api/command
-   ```
-3. Port 14564/TCP allowed through the PC's firewall.
-4. Recommended: give the PC a DHCP reservation (static IP). If its IP changes, use
-   **Settings → Devices & services → GoXLR Control → ⋮ → Reconfigure**.
-
-## Install (HACS)
-
-1. HACS → ⋮ → *Custom repositories* → add `https://github.com/MineMax6543/ha-goxlr-control`,
-   category *Integration*.
-2. Install **GoXLR Control** and restart Home Assistant.
-3. *Settings → Devices & services → Add integration → GoXLR Control*. Enter the PC's IP, port `14564`.
-
-Manual install: copy `custom_components/goxlr_control` into your HA `config/custom_components/`.
-
-## Devices
-
-You get two devices:
-
-- **GoXLR Utility** (hub): the app on your PC. It always exists, even while the PC is off.
-- **GoXLR** / **GoXLR Mini**: the mixer, linked to the hub.
-
-Controls that only exist on the full-size GoXLR (effects, sampler, fader screens) aren't
-created for a Mini.
-
-### Advanced controls (hidden by default)
-
-A full-size GoXLR has about 300 controls. To keep the device page usable, the
-fine-tuning ones (marked *off* below) are hidden until you ask for them, a whole group at a time:
-
-**Settings → Devices & services → GoXLR Control → Configure**
-
-| Group | What it adds |
-|---|---|
-| Routing matrix | One switch per input → output route (~45) |
-| Mix B (submix) details | Per-channel Mix B volumes and links, and which mix each output uses. These only work while **Mix B (submix)** is on. |
-| Mic EQ | Gain and frequency for every EQ band |
-| Noise gate & compressor timing | Attack and release |
-| Effect fine-tuning | Reverb decay, echo delays/tempo, robot bands, … (each effect's amount and style are always on) |
-| Fader screen extras | Number, icon, invert (the screen text is always on) |
-| Sampler pad settings | Playback mode and order per pad and bank, pre-record buffer, clear behaviour |
-| Lighting details | Animation modifiers, waterfall, per-fader light styles |
-| Other rarely used | Mic level sensor, VOD mode, preset rename, Utility log level, open window on launch |
-
-Turning a group on enables all of its entities, and turning it off hides them again.
-Groups you don't touch keep any entities you enabled or disabled yourself.
-
-## Entities
-
-### Mixing
-| Entity | Notes |
-|---|---|
-| *Channel* volume | Mic, Line in, Console, System, Game, Chat, Sample, Music, Headphones, Mic monitor, Line out (0–100 %) |
-| Fader A–D mute | Mutes to the fader's mute target. Attributes show the channel, target and whether it's muted to all. |
-| Mic mute | The mute (cough) button. Needs *Mic mute button mode* = Toggle (you get a clear error otherwise). |
-| Fader A–D channel | Which channel each fader controls |
-| Fader A–D mute target | Everything / Stream / Voice chat / Headphones / Line out (+ stream mix 2 options when supported) |
-| Headphone mix | Which mix you hear in your headphones (devices with submix support) |
-| Mix B (submix) | Turn the second mix on/off |
-| *Channel* volume (mix B), *Channel* mix B linked, *Output* source mix | Submix details (*off*) |
-| Route *input* to *output* | The full routing matrix (*off*). Invalid routes are left out. |
-| Lock faders when muted to all | |
-
-### Microphone
-| Entity | Notes |
-|---|---|
-| Mic type | Dynamic (XLR) / Condenser (XLR, +48 V phantom power) / 3.5 mm jack |
-| Mic gain | 0–72 dB for the active mic type |
-| Noise gate, Noise gate threshold / attenuation | Attack and release are *off* |
-| Compressor threshold / ratio / makeup gain | Attack and release are *off* |
-| De-esser, Bleep volume | |
-| EQ *band* gain / frequency | 10 bands (full) or 6 bands (Mini) (*off*). Neighbouring bands can't cross. |
-| Mic mute button mode / target, Mute-to-all hold duration | |
-| Voice chat mute-to-all also mutes chat mic | |
-| Profile, Mic profile, Save profile, Save mic profile | |
-
-### Mic level monitoring (opt-in)
-The Utility only reports the mic level when asked, so this is **off by default**. Turn on
-**Mic level monitoring** to enable:
-
-- **Speaking** (binary sensor): turns on as soon as you go above the **Speaking threshold**
-  (default −40 dBFS) and stays on for 1 s after you go quiet, so it doesn't flicker between
-  words. Use it for an "on air" light.
-- **Mic level** (sensor, dBFS, *off*): rounded to whole dB and updated at most once a second.
-  It changes constantly while you talk, so if you enable it, consider excluding it from the
-  recorder.
-
-While monitoring is on, the level is read 4 times a second over the existing websocket.
-When it's off, nothing is polled.
-
-### Effects (full-size only)
-| Entity | Notes |
-|---|---|
-| Effects, Megaphone, Robot, Hard tune | On/off |
-| Effect preset | Slots 1–6, shown with their names |
-| Reverb / Echo / Pitch / Gender / Megaphone / Hard tune amount | Pitch and gender limits follow the selected style. With Hard tune on, pitch snaps to octaves. |
-| Reverb / Echo / Pitch / Gender / Megaphone / Robot / Hard tune style, Hard tune source | |
-| Mic monitoring follows effects | |
-| Save effect preset to library, Load library preset into active slot, Effect preset name | Loading replaces unsaved changes in the active slot |
-| Reverb decay, echo tempo, robot bands … | All fine-tuning parameters (*off*) |
-
-### Sampler (full-size only)
-| Entity | Notes |
-|---|---|
-| Sampler bank | A / B / C |
-| Play / Stop *pad* sample | Acts on the active bank. Play is unavailable on empty pads. |
-| Sampler *pad* playing | With the pad's sample names as an attribute |
-| Sampler fade-out duration | |
-| Per bank and pad playback mode / order, pre-record buffer, clear behaviour | (*off*) |
-
-### Lighting and screens
-| Entity | Notes |
-|---|---|
-| Lighting (light) | Set a colour or brightness to colour the whole device. Off turns the LEDs black. On restores what was there before: the colour you last set from Home Assistant, or otherwise the colours **saved** in your profile. (Don't save the profile while the lights are off, or "on" will restore black.) The `turn_on_restores` attribute shows which one will happen. |
-| Restore profile lighting | Reloads the profile's colours |
-| Lighting animation | Rainbow retro / bright / dark, Simple, Ripple (Ripple isn't available on the Mini) |
-| Lighting waterfall, gradient mod 1 / 2, Fader *X* light style | (*off*). These show as unavailable when the current animation mode doesn't use them. |
-| Fader A–D screen text | The small fader screens (full-size only) |
-| Fader A–D screen number / icon / inverted | (*off*) |
-
-### Physical buttons → automations
-Every button on the device is an **event** entity (fader mutes, bleep, mic mute, effect
-buttons, sampler pads, sampler bank and clear buttons). Each one fires:
-
-- `pressed` when the button goes down
-- `long_press` while it's still held, after the mute hold duration (500 ms by default)
-- `short_press` on release, if it wasn't a long press
-- `released` on every release
-
-```yaml
-automation:
-  - alias: Sampler clear button toggles desk lamp
-    triggers:
-      - trigger: state
-        entity_id: event.goxlr_sampler_clear_button
-        attribute: event_type
-        to: short_press
-    actions:
-      - action: light.toggle
-        target:
-          entity_id: light.desk_lamp
+```mermaid
+flowchart LR
+    HA["🏠 Home Assistant<br/>GoXLR Control Plus"]
+    U["💻 GoXLR Utility<br/>on your PC"]
+    G["🎚️ GoXLR"]
+    U -- "live updates (websocket)" --> HA
+    HA -- "commands (HTTP)" --> U
+    U <-- USB --> G
 ```
 
-The physical buttons still do their normal job on the GoXLR. These events let Home Assistant
-react as well.
+## Setup
 
-### Firmware
-**Firmware** (update entity) shows when the Utility knows of newer firmware. Installing is
-deliberately left to the Utility: an interrupted firmware flash can brick the mixer, so
-someone should be at the PC when it runs.
+1. **On the PC:** in the GoXLR Utility settings, turn on **Allow Network Access** and restart the Utility. Allow TCP port **14564** through the firewall.
+2. **In HACS:** ⋮ → *Custom repositories* → add `https://github.com/MineMax6543/ha-goxlr-control` (type *Integration*), download **GoXLR Control Plus**, and restart Home Assistant.
+3. **In Home Assistant:** *Settings → Devices & services → Add integration → GoXLR Control Plus*, then enter the PC's IP address and port `14564`.
 
-### GoXLR Utility (hub device)
-| Entity | Notes |
+> **Tip:** give the PC a fixed IP address in your router. If the IP changes later, use **⋮ → Reconfigure** on the integration.
+
+## What you can control
+
+| Area | Highlights |
 |---|---|
-| Connection | Stays available, so you can alert on outages |
-| Auto reconnect | See below |
-| Open Utility window | Opens the UI on the PC |
-| Start on login, Show tray icon, Speak button presses | Utility settings |
-| Open window on launch, Log level | (*off*) |
-| Utility version | Diagnostic |
+| 🎚️ **Mixing** | Volume of every channel, fader mutes, mic mute, fader assignments, mute targets, Mix B, headphone mix, routing |
+| 🎙️ **Microphone** | Mic type and gain, noise gate, compressor, de-esser, EQ, profiles |
+| ✨ **Effects** | On/off, presets, and style and amount for reverb, echo, pitch, gender, megaphone, robot, hard tune |
+| ▶️ **Sampler** | Bank, play/stop each pad, "is playing" sensors |
+| 💡 **Lighting** | The whole device as one RGB light, animations, fader screen text |
+| 🔘 **Buttons** | Every physical button triggers automations: `pressed`, `short_press`, `long_press`, `released` |
+| 🗣️ **Speaking** | Optional "you're talking" sensor, ideal for an on-air light |
+| 🖥️ **Utility** | Connection status, auto reconnect, start on login, open the Utility window, firmware update notice |
 
-## Auto reconnect toggle
+The full-size GoXLR gets about 300 entities. The Mini gets only the ones it supports.
 
-If your PC's power is cut when it's off, you may not want Home Assistant to keep retrying.
-Turn off `switch.goxlr_utility_auto_reconnect`:
+### Advanced controls
 
-- **Off:** stays connected while the PC is on. Once the connection drops, it stops retrying.
-- **On:** retries until it reconnects. Switching it on triggers an immediate attempt.
-- The setting is remembered across restarts. With it off, Home Assistant still makes **one**
-  attempt at startup, so it connects if the PC is already on.
+Fine-tuning controls are hidden until you want them. Switch them on a group at a time under
+**Settings → Devices & services → GoXLR Control Plus → Configure**:
 
-Example: link it to the smart plug that powers the PC.
+| Group | Adds |
+|---|---|
+| Routing matrix | One switch per input → output route |
+| Mix B details | Per-channel Mix B volumes and links (only work while **Mix B** is on) |
+| Mic EQ | Gain and frequency per band |
+| Noise gate & compressor timing | Attack and release |
+| Effect fine-tuning | Reverb decay, echo delays, robot bands, … |
+| Fader screen extras | Screen number, icon, invert |
+| Sampler pad settings | Playback mode and order per pad |
+| Lighting details | Animation modifiers, fader light styles |
+| Other rarely used | Mic level sensor, VOD mode, log level, … |
+
+## Staying connected
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Connecting
+    Connecting --> Connected: full state sync
+    Connected --> Connected: live updates, resync every 5 min
+    Connected --> Waiting: dropped or silent for 60 s
+    Waiting --> Connecting: retry after 1–30 s
+    Waiting --> Paused: Auto reconnect off
+    Paused --> Connecting: Auto reconnect on
+```
+
+- A heartbeat catches connections that died silently, and a full resync repairs anything that was missed.
+- If the PC is off, controls show as *unavailable* and come back on their own when it's on again.
+- If the PC's power is cut when it's off, turn **Auto reconnect** off to stop retrying. Turning it on reconnects immediately. You can tie it to a smart plug:
 
 ```yaml
 automation:
@@ -216,42 +98,74 @@ automation:
           entity_id: switch.goxlr_utility_auto_reconnect
 ```
 
-## Raw commands: everything else
+## Good to know
 
-Two actions can send **any** Utility command, for the few things that don't make sense as
-entities (sample file management, per-button colours, creating or deleting profiles, …).
-Command names and arguments match the
-[GoXLR Utility API](https://github.com/GoXLR-on-Linux/goxlr-utility/blob/main/ipc/src/lib.rs).
+<details>
+<summary><b>🗣️ Speaking sensor</b></summary>
+
+Turn on **Mic level monitoring** to get **Speaking**. It turns on when you go above the
+**Speaking threshold** (default −40 dBFS) and stays on for 1 second after you go quiet. Nothing is
+polled while monitoring is off.
+</details>
+
+<details>
+<summary><b>🔘 Using GoXLR buttons in automations</b></summary>
 
 ```yaml
-# Colour fader A red/black
+triggers:
+  - trigger: state
+    entity_id: event.goxlr_sampler_clear_button
+    attribute: event_type
+    to: short_press
+```
+A long press fires after the GoXLR's mute hold time (500 ms by default). The buttons
+still do their normal job on the GoXLR.
+</details>
+
+<details>
+<summary><b>💡 The Lighting light</b></summary>
+
+Pick a colour to colour the whole device. **Off** turns the LEDs black. **On** brings back the
+colour you last set from Home Assistant, or otherwise your profile's *saved* colours.
+</details>
+
+<details>
+<summary><b>🎙️ Mic mute says "Hold mode"</b></summary>
+
+The GoXLR's mute button can be set to *hold* to mute. Set **Mic mute button mode** to
+*Toggle* to control it from Home Assistant.
+</details>
+
+<details>
+<summary><b>🛠️ Anything else: raw commands</b></summary>
+
+`goxlr_control.send_command` and `goxlr_control.send_utility_command` can send any
+[GoXLR Utility command](https://github.com/GoXLR-on-Linux/goxlr-utility/blob/main/ipc/src/lib.rs):
+
+```yaml
 action: goxlr_control.send_command
 data:
-  device_id: <your GoXLR device>
+  device_id: <your GoXLR>
   command: {"SetFaderColours": ["A", "FF0000", "000000"]}
-
-# Other examples:
-#   {"SetButtonColours": ["Cough", "FF0000", null]}
-#   {"SaveProfileAs": "Streaming backup"}
-#   {"SetSampleStartPercent": ["A", "TopLeft", 0, 12.5]}
-#   {"SetElementDisplayMode": ["Equaliser", "Advanced"]}
-
-# Utility-level command
-action: goxlr_control.send_utility_command
-data:
-  command: {"SetSampleGainPct": ["intro.wav", 80]}
 ```
+</details>
 
-Both actions return the Utility's response when called with `response_variable`.
+<details>
+<summary><b>🚫 What's deliberately left out</b></summary>
 
-### Intentionally not exposed as entities
-| Command | Why |
+- **Allow network access:** turning it off would lock Home Assistant out.
+- **Stop Utility:** it can't be started again remotely.
+- **Firmware install:** an interrupted update can brick the GoXLR. You get a notice when an update is available, and you install it from the Utility.
+- **Deleting profiles:** too destructive for a one-click control. It's still possible with `send_command`.
+</details>
+
+## Troubleshooting
+
+| Problem | Fix |
 |---|---|
-| Allow network access | Turning it off would cut Home Assistant off from the Utility |
-| Stop Utility | It can't be started again remotely |
-| Firmware update | An interrupted flash can brick the mixer (see Firmware above) |
-| Delete profile / mic profile, recover defaults | Destructive. Available through `send_command` if you really need them. |
-| Shutdown / sleep / wake command lists, UI display modes, language, activator path | Utility UI configuration with no use in automations |
+| "Could not reach the GoXLR Utility" | Check that **Allow Network Access** is on, port 14564 is open, and the IP is right. `http://<PC-IP>:14564` should open the Utility in a browser. |
+| Integration not listed | Restart Home Assistant fully and hard-refresh the browser |
+| Mix B controls unavailable | Turn on the **Mix B (submix)** switch |
 
 ## Development
 
@@ -259,6 +173,7 @@ Both actions return the Utility's response when called with `response_variable`.
 pip install pytest-homeassistant-custom-component
 pytest
 ```
-The tests run the integration inside a real Home Assistant instance against a fake GoXLR daemon.
-They cover the config flow, every entity loading, command round-trips, mic monitoring, button
-events, lighting, the GoXLR Mini, an outage with recovery, and the auto-reconnect toggle.
+
+The tests run the integration inside a real Home Assistant instance against a fake GoXLR Utility.
+
+<sub>Not affiliated with TC-Helicon. GoXLR is a trademark of its owner.</sub>

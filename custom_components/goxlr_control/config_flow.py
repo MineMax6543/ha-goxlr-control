@@ -1,4 +1,4 @@
-"""Config flow for GoXLR Control."""
+"""Config flow for GoXLR Control Plus."""
 
 from __future__ import annotations
 

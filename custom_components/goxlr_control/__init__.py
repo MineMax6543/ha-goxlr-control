@@ -1,4 +1,4 @@
-"""GoXLR Control: resilient local-push control of the GoXLR Utility."""
+"""GoXLR Control Plus: resilient local-push control of the GoXLR Utility."""
 
 from __future__ import annotations
 
