@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" width="960" height="400" role="img" aria-label="The GoXLR is connected by USB to the GoXLR Utility on your PC. The Utility pushes every change live to GoXLR Control Plus and receives its commands. GoXLR Control Plus turns this into mixing, microphone, effects, lighting and button entities in Home Assistant.">
+  <style>
+    :root {
+      --bg: #ffffff; --card: #f4f5f7; --line: #d0d5dd; --text: #1d2939; --muted: #667085; --arrow: #98a2b3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0d1117; --card: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8b949e; --arrow: #6e7681; }
+    }
+    .bg { fill: var(--bg); }
+    .card { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+    .t { fill: var(--text); font: 600 17px system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .s { fill: var(--muted); font: 400 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .w { fill: #ffffff; font: 700 19px system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .ws { fill: #ffffffd9; font: 400 13.5px system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .a { stroke: var(--arrow); stroke-width: 2.5; fill: none; marker-end: url(#head); }
+    .al { fill: var(--muted); font: 600 12.5px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  </style>
+  <defs>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22c3dd"/>
+      <stop offset="0.55" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#e5458f"/>
+    </linearGradient>
+    <marker id="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#98a2b3"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="960" height="400" rx="16"/>
+
+  <!-- GoXLR -->
+  <rect class="card" x="24" y="110" width="170" height="180" rx="14"/>
+  <text class="t" x="44" y="146">GoXLR</text>
+  <text class="s" x="44" y="168">or GoXLR Mini</text>
+  <text class="s" x="44" y="206">faders, mic,</text>
+  <text class="s" x="44" y="226">effects, sampler,</text>
+  <text class="s" x="44" y="246">lights, buttons</text>
+
+  <!-- USB -->
+  <path class="a" d="M200 200 H246" style="marker-start: url(#head)"/>
+  <text class="al" x="206" y="188">USB</text>
+
+  <!-- Utility -->
+  <rect class="card" x="252" y="130" width="186" height="140" rx="14"/>
+  <text class="t" x="272" y="176">GoXLR Utility</text>
+  <text class="s" x="272" y="200">on your Windows</text>
+  <text class="s" x="272" y="220">or Linux PC</text>
+  <text class="s" x="272" y="250">port 14564</text>
+
+  <!-- Live / commands -->
+  <path class="a" d="M440 186 H502"/>
+  <path class="a" d="M502 216 H446"/>
+  <text class="al" x="448" y="174">LIVE</text>
+  <text class="al" x="448" y="240">commands</text>
+
+  <!-- Plus -->
+  <rect x="508" y="120" width="170" height="160" rx="16" fill="url(#brand)"/>
+  <text class="w" x="528" y="190">GoXLR</text>
+  <text class="w" x="528" y="214">Control Plus</text>
+  <text class="ws" x="528" y="246">reconnects on</text>
+  <text class="ws" x="528" y="264">its own, always</text>
+
+  <!-- Arrows to HA -->
+  <path class="a" d="M680 160 C705 160 705 80 728 80"/>
+  <path class="a" d="M680 185 C705 185 705 160 728 160"/>
+  <path class="a" d="M680 215 C705 215 705 240 728 240"/>
+  <path class="a" d="M680 240 C705 240 705 320 728 320"/>
+
+  <!-- HA side -->
+  <rect class="card" x="734" y="44" width="204" height="68" rx="12"/>
+  <text class="t" x="752" y="72">Mixing &amp; mic</text>
+  <text class="s" x="752" y="94">volumes, mutes, routing</text>
+
+  <rect class="card" x="734" y="124" width="204" height="68" rx="12"/>
+  <text class="t" x="752" y="152">Effects &amp; sampler</text>
+  <text class="s" x="752" y="174">presets, reverb, pads</text>
+
+  <rect class="card" x="734" y="204" width="204" height="68" rx="12"/>
+  <text class="t" x="752" y="232">Lighting</text>
+  <text class="s" x="752" y="254">one RGB light, screens</text>
+
+  <rect class="card" x="734" y="284" width="204" height="68" rx="12"/>
+  <text class="t" x="752" y="312">Buttons &amp; speaking</text>
+  <text class="s" x="752" y="334">presses, on-air sensor</text>
+
+  <text class="s" x="734" y="384">→ your automations &amp; dashboards</text>
+</svg>
